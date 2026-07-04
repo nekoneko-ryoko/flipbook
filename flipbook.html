@@ -15,7 +15,7 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" data-presets="react">
+  <script type="text/babel">
     const { useState, useRef, useEffect, useCallback } = React;
 
 
@@ -275,7 +275,7 @@ function App() {
         }
         mkThumb(frame);
       };
-      if (img?.complete) doPlace();
+      if (img && img.complete) doPlace();
       else if (img) { img.onload = doPlace; }
       return;
     }
@@ -394,7 +394,7 @@ function App() {
     setFrames(p=>p.map((f,i)=>i!==fi?f:{...f,layers:[...f.layers.slice(0,li+1),nl,...f.layers.slice(li+1)]})); setLi(li+1);
   };
   const clrLayer = () => {
-    const frame=frames[fi], layer=frame?.layers[li]; if(!layer) return;
+    const frame=frames[fi], layer=frame && frame.layers[li]; if(!layer) return;
     const lc=glc(frame.id,layer.id), ctx=lc.getContext('2d');
     undoMap.current[`${frame.id}_${layer.id}`]=ctx.getImageData(0,0,CW,CH);
     ctx.clearRect(0,0,CW,CH); rerender(); mkThumb(frame);
@@ -407,9 +407,23 @@ function App() {
     // Composite full frame
     const tc = document.createElement('canvas'); tc.width=CW; tc.height=CH;
     comp(frame, tc.getContext('2d'), false, null);
-    // Crop to selection (preserve transparency by using fresh canvas)
+    // Crop to selection
     const mc = document.createElement('canvas'); mc.width=selRect.w; mc.height=selRect.h;
-    mc.getContext('2d').drawImage(tc, selRect.x, selRect.y, selRect.w, selRect.h, 0, 0, selRect.w, selRect.h);
+    const mctx = mc.getContext('2d');
+    mctx.drawImage(tc, selRect.x, selRect.y, selRect.w, selRect.h, 0, 0, selRect.w, selRect.h);
+    
+    // Convert white background to transparent
+    const imgData = mctx.getImageData(0, 0, selRect.w, selRect.h);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i+1], b = data[i+2];
+      // If pixel is white (255,255,255), make it transparent (alpha=0)
+      if (r === 255 && g === 255 && b === 255) {
+        data[i+3] = 0;
+      }
+    }
+    mctx.putImageData(imgData, 0, 0);
+    
     const id = nmid();
     const mat = { id, name: `素材 ${id}`, dataURL: mc.toDataURL('image/png'), w: selRect.w, h: selRect.h };
     const img = new Image(); img.src = mat.dataURL; imgCache.current[id] = img;
@@ -423,7 +437,7 @@ function App() {
   const deleteMaterial = id => {
     setMaterials(p => p.filter(m => m.id !== id));
     delete imgCache.current[id];
-    if (stampMat?.id === id) { setStampMat(null); setTool('pen'); }
+    if (stampMat && stampMat.id === id) { setStampMat(null); setTool('pen'); }
     setStatus("素材を削除しました");
   };
 
@@ -466,7 +480,7 @@ function App() {
   const save = () => {
     const d = {
       version: 2, fps,
-      frames: frames.map(f => ({...f, layers: f.layers.map(l => ({...l, data: (lcs.current[`${f.id}_${l.id}`]||null)?.toDataURL('image/png')??null}))})),
+      frames: frames.map(f => ({...f, layers: f.layers.map(l => ({...l, data: (function(c){return c?c.toDataURL("image/png"):null;})(lcs.current[f.id+"_"+l.id])}))})),
       materials
     };
     const a=document.createElement('a');
@@ -491,7 +505,7 @@ function App() {
             const img=new Image(); img.onload=()=>{const c=document.createElement('canvas');c.width=CW;c.height=CH;c.getContext('2d').drawImage(img,0,0);lcs.current[`${f.id}_${l.id}`]=c;res();};img.onerror=res;img.src=l.data;
           })))).then(()=>{
             setFrames(lf); setFi(0); setLi(0);
-            if (d.materials?.length) {
+            if (d.materials && d.materials.length) {
               _mid=Math.max(_mid,...d.materials.map(m=>m.id));
               d.materials.forEach(m=>{const i=new Image();i.src=m.dataURL;imgCache.current[m.id]=i;});
               setMaterials(d.materials);
@@ -507,7 +521,7 @@ function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const frame = frames[fi] || frames[0];
-  const layers = frame?.layers || [];
+  const layers = frame && frame.layers || [];
   const cursorStyle = tool === 'stamp' ? 'none' : 'crosshair';
 
   return (
@@ -700,9 +714,9 @@ function App() {
                     width:82, height:58, background:'#e8e8ee',
                     backgroundImage:'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'16\' height=\'16\'%3E%3Crect width=\'8\' height=\'8\' fill=\'%23ccc\'/%3E%3Crect x=\'8\' y=\'8\' width=\'8\' height=\'8\' fill=\'%23ccc\'/%3E%3C/svg%3E")',
                     backgroundSize:'8px 8px',
-                    border:stampMat?.id===mat.id?'2.5px solid #ff6b9d':'2px solid #3a3a58',
+                    border:stampMat && stampMat.id===mat.id?'2.5px solid #ff6b9d':'2px solid #3a3a58',
                     borderRadius:5, overflow:'hidden', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
-                    boxShadow:stampMat?.id===mat.id?'0 0 8px rgba(255,107,157,0.6)':undefined,
+                    boxShadow:stampMat && stampMat.id===mat.id?'0 0 8px rgba(255,107,157,0.6)':undefined,
                     transition:'border 0.15s, box-shadow 0.15s', flexShrink:0
                   }}>
                   <img src={mat.dataURL} alt={mat.name}
@@ -711,12 +725,12 @@ function App() {
                 {/* Editable name */}
                 <input value={mat.name} onChange={e => renameMaterial(mat.id, e.target.value)}
                   onClick={e => e.stopPropagation()}
-                  style={{ width:84, fontSize:9, background:'transparent', border:'none', color:stampMat?.id===mat.id?'#ff9bc0':'#888', textAlign:'center', outline:'none', padding:'1px 2px', cursor:'text' }} />
+                  style={{ width:84, fontSize:9, background:'transparent', border:'none', color:stampMat && stampMat.id===mat.id?'#ff9bc0':'#888', textAlign:'center', outline:'none', padding:'1px 2px', cursor:'text' }} />
                 {/* Action buttons */}
                 <div style={{ display:'flex', gap:2 }}>
                   <button onClick={() => activateStamp(mat)}
-                    style={{ fontSize:9, padding:'2px 6px', border:'none', borderRadius:3, background:stampMat?.id===mat.id?'#ff6b9d':'#2a2a6a', color:'#ddd', cursor:'pointer', whiteSpace:'nowrap', fontWeight:stampMat?.id===mat.id?700:400 }}>
-                    {stampMat?.id===mat.id ? '使用中' : 'スタンプ'}
+                    style={{ fontSize:9, padding:'2px 6px', border:'none', borderRadius:3, background:stampMat && stampMat.id===mat.id?'#ff6b9d':'#2a2a6a', color:'#ddd', cursor:'pointer', whiteSpace:'nowrap', fontWeight:stampMat && stampMat.id===mat.id?700:400 }}>
+                    {stampMat && stampMat.id===mat.id ? '使用中' : 'スタンプ'}
                   </button>
                   <button onClick={() => deleteMaterial(mat.id)}
                     style={{ fontSize:9, padding:'2px 4px', border:'none', borderRadius:3, background:'#3a1515', color:'#cc4444', cursor:'pointer' }}>✕</button>
@@ -765,6 +779,7 @@ function TabBtn({ children, active, onClick }) {
 }
 function Sep() { return <div style={{ width:1, height:20, background:'#252545', margin:'0 2px' }} />; }
 function HR()  { return <div style={{ height:1, width:38, background:'#252545', margin:'2px 0' }} />; }
+
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
